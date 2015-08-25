@@ -32,6 +32,7 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+
 #ifndef PISCOPINATOR_H
 #define PISCOPINATOR_H
 // Define which Raspberry Pi board are you using. Take care to have defined only one at time.
@@ -85,8 +86,8 @@ struct rpiPeripheral {
         volatile unsigned int *addr;
 };
 
-extern struct rpiPeripheral gpio;  // They have to be found somewhere, but can't be in the header
-extern struct rpiPeripheral bsc0;  // so use extern!!
+//extern struct rpiPeripheral gpio;  // They have to be found somewhere, but can't be in the header
+//extern struct rpiPeripheral bsc0;  // so use extern!!
 
 
 // GPIO setup macros. Always use INP_GPIO(x) before using OUT_GPIO(x) or SET_GPIO_ALT(x,y)
@@ -98,6 +99,7 @@ extern struct rpiPeripheral bsc0;  // so use extern!!
 #define GPIO_CLR    *(gpio.addr + 10) // clears bits which are 1 ignores bits which are 0
 
 #define GPIO_READ(g)    *(gpio.addr + 13) &= (1<<(g))
+#define GPIO_READ_ALL	*(gpio.addr + 13)
 
 // I2C macros
 #define BSC0_CONFIG     *(bsc0.addr + 0x00)
@@ -129,6 +131,23 @@ extern struct rpiPeripheral bsc0;  // so use extern!!
 #define BSC_STATUS_TA        1
 
 #define CLEAR_STATUS    BSC_STATUS_CLKT|BSC_S_ERR|BSC_S_DONE
+
+int mapPeripheral(struct rpiPeripheral *periph);
+void unmapPeripheral(struct rpiPeripheral *periph);
+static void piScopinatorReadGPIO (void);
+static int piScopinatorDeviceOpen(struct inode* inode, struct file* filp);
+static int piScopinatorDeviceClose(struct inode* inode, struct file* filp);
+static ssize_t piScopinatorDeviceRead(struct file* filp, char __user *buffer, size_t length, loff_t* offset);
+static ssize_t piScopinatorSampleCount(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin1(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin2(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin3(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin4(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin5(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorChannel1Pin6(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
+static ssize_t piScopinatorReadConfig(struct device* dev, struct device_attribute* attr, char* buf);
+static int __init piScopinatorModuleInit(void);
+static void __exit piScopinatorModuleExit(void);
 
 
 #endif

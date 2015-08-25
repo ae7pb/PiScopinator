@@ -77,14 +77,64 @@ static int piScopinatorCh1Pin6 = PISCOPINATOR_PIN_6;
 static int piScopinatorSampleSize = PISCOPINATOR_SAMPLE_SIZE;
 
 // Data that we collected
-static int piscopinatorData[PISCOPINATOR_SAMPLE_SIZE];
+static int piScopinatorData[PISCOPINATOR_SAMPLE_SIZE];
 static int *dataPointer;
+
+static struct rpiPeripheral gpio = {GPIO_BASE};
+
+
+/*     Oscilloscope functions and hardware related    */
+
+static void piScopinatorReadGPIO (void) {
+	
+	int x = 0;
+    dbg("");	
+	// First set the pins to input  We allow pin choice and we don't know what else
+	// the pi is doing so we may as well set this each time we draw a sample.
+	INP_GPIO(piScopinatorCh1Pin1);
+	INP_GPIO(piScopinatorCh1Pin2);
+	INP_GPIO(piScopinatorCh1Pin3);
+	INP_GPIO(piScopinatorCh1Pin4);
+	INP_GPIO(piScopinatorCh1Pin5);
+	INP_GPIO(piScopinatorCh1Pin6);
+
+	// IRQs will mess up our sample times so turn them off.
+    local_irq_disable();
+    local_fiq_disable();
+    
+	for(x = 0; x < piScopinatorSampleSize; x++) {
+		piScopinatorData[x] = GPIO_READ_ALL;
+	}
+    
+    
+    
+    // don't forget to reactivate IRQ
+    local_fiq_enable();
+    local_irq_enable();    
+    
+    	
+}
+
+// Exposes the physical address defined in the passed structure using mmap on /dev/mem
+int mapPeripheral(struct rpiPeripheral *periph)
+{
+    periph->addr=(uint32_t *)ioremap(GPIO_BASE, 41*4); //41 GPIO register with 32 bit (4*8)
+    return 0;
+}
+ 
+void unmapPeripheral(struct rpiPeripheral *periph) {
+    iounmap(periph->addr);//unmap the address
+}
+
+
+/*   /dev/piscopinator related */
 
 static int piScopinatorDeviceOpen(struct inode* inode, struct file* filp)
 {
-    int x = 0;
+
     dbg("");
-    // TODO: set up pins
+    
+    piScopinatorReadGPIO();
 
 	/* Our sample device does not allow write access */
 	if ( ((filp->f_flags & O_ACCMODE) == O_WRONLY)
@@ -100,10 +150,6 @@ static int piScopinatorDeviceOpen(struct inode* inode, struct file* filp)
 		return -EBUSY;
 	}
 
-    for(x = 0; x < 10000; x++) {
-        piscopinatorData[x] = x;
-    }
-
 
 	messageRead = false;
 	return 0;
@@ -111,7 +157,6 @@ static int piScopinatorDeviceOpen(struct inode* inode, struct file* filp)
 
 static int piScopinatorDeviceClose(struct inode* inode, struct file* filp)
 {
-    // TODO: restore pins
 
 	dbg("");
 	mutex_unlock(&piScopinatorDeviceMutex);
@@ -133,7 +178,7 @@ static ssize_t piScopinatorDeviceRead(struct file* filp, char __user *buffer, si
      * one_shot avoids that */
     if (messageRead) return 0;
     dbg("");
-    dataPointer = (int*)&piscopinatorData;
+    dataPointer = (int*)&piScopinatorData;
 
     while (length && (dataCount < piScopinatorSampleSize)) {
         memset(messageOutput,0,70);
@@ -170,6 +215,9 @@ static struct file_operations fops = {
 	.open = piScopinatorDeviceOpen,
 	.release = piScopinatorDeviceClose
 };
+
+/*  sysfs related /sys/device/virtual/piscopinator */
+
 
 /* Placing data into the read FIFO is done through sysfs */
 static ssize_t piScopinatorSampleCount(struct device* dev, struct device_attribute* attr, const char* buf, size_t count)
@@ -364,6 +412,7 @@ static DEVICE_ATTR(readConfig, S_IRUSR|S_IRGRP, piScopinatorReadConfig, NULL);
 static int __init piScopinatorModuleInit(void)
 {
 	int retval;
+	
 	dbg("");
 
 	/* First, see if we can dynamically allocate a major for our device */
@@ -429,6 +478,9 @@ static int __init piScopinatorModuleInit(void)
 	mutex_init(&piScopinatorDeviceMutex);
 	/* This device uses a Kernel FIFO for its read operation */
 
+	// need to map the memory of the gpio registers
+	mapPeripheral(&gpio);
+
 	return 0;
 
 failed_devreg:
@@ -455,6 +507,7 @@ static void __exit piScopinatorModuleExit(void)
 	class_unregister(piScopinatorClass);
 	class_destroy(piScopinatorClass);
 	unregister_chrdev(piScopinatorMajor, DEVICE_NAME);
+	unmapPeripheral(&gpio);
 }
 
 /* Let the kernel know the calls for module init and exit */
