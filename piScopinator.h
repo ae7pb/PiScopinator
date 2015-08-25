@@ -146,6 +146,7 @@ static ssize_t piScopinatorChannel1Pin4(struct device* dev, struct device_attrib
 static ssize_t piScopinatorChannel1Pin5(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
 static ssize_t piScopinatorChannel1Pin6(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
 static ssize_t piScopinatorReadConfig(struct device* dev, struct device_attribute* attr, char* buf);
+static ssize_t piScopinatorReadTime(struct device* dev, struct device_attribute* attr, char* buf);
 static int __init piScopinatorModuleInit(void);
 static void __exit piScopinatorModuleExit(void);
 

@@ -79,6 +79,7 @@ static int piScopinatorSampleSize = PISCOPINATOR_SAMPLE_SIZE;
 // Data that we collected
 static int piScopinatorData[PISCOPINATOR_SAMPLE_SIZE];
 static int *dataPointer;
+static long piScopinatorDataTime = 0;
 
 static struct rpiPeripheral gpio = {GPIO_BASE};
 
@@ -88,6 +89,9 @@ static struct rpiPeripheral gpio = {GPIO_BASE};
 static void piScopinatorReadGPIO (void) {
 	
 	int x = 0;
+	struct timespec startTime, endTime;
+	
+	
     dbg("");	
 	// First set the pins to input  We allow pin choice and we don't know what else
 	// the pi is doing so we may as well set this each time we draw a sample.
@@ -102,11 +106,21 @@ static void piScopinatorReadGPIO (void) {
     local_irq_disable();
     local_fiq_disable();
     
-	for(x = 0; x < piScopinatorSampleSize; x++) {
+    // time this bad boy
+    getnstimeofday(&startTime);
+    
+    // get the data for the whole first 32 gpio pins & figure out what we want later
+	for(x = piScopinatorSampleSize; x >0; x--) {
 		piScopinatorData[x] = GPIO_READ_ALL;
 	}
     
+    // end time
+    getnstimeofday(&endTime);
     
+    // even though the functions say nano seconds it won't really be nano second resolution since our pi 
+    // isn't that fast.  Oh well
+    
+    piScopinatorDataTime = timespec_to_ns(&endTime) - timespec_to_ns(&startTime);
     
     // don't forget to reactivate IRQ
     local_fiq_enable();
@@ -397,6 +411,12 @@ static ssize_t piScopinatorReadConfig(struct device* dev, struct device_attribut
 		piScopinatorCh1Pin6, piScopinatorSampleSize);
 }
 
+/* This sysfs entry displays the sample time */
+static ssize_t piScopinatorReadTime(struct device* dev, struct device_attribute* attr, char* buf)
+{
+	
+	return scnprintf(buf, PAGE_SIZE, "Time spent in ns: %lu\n", piScopinatorDataTime);
+}
 
 /* Declare the sysfs entries. DEVICE_ATTR(name shown, permissions, read function, write function) */
 static DEVICE_ATTR(sampleCount, S_IWUSR|S_IWGRP, NULL, piScopinatorSampleCount);
@@ -407,6 +427,7 @@ static DEVICE_ATTR(channel1Pin4, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin4
 static DEVICE_ATTR(channel1Pin5, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin5);
 static DEVICE_ATTR(channel1Pin6, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin6);
 static DEVICE_ATTR(readConfig, S_IRUSR|S_IRGRP, piScopinatorReadConfig, NULL);
+static DEVICE_ATTR(readTime, S_IRUSR|S_IRGRP, piScopinatorReadTime, NULL);
 
 /* Module initialization and release */
 static int __init piScopinatorModuleInit(void)
@@ -474,6 +495,10 @@ static int __init piScopinatorModuleInit(void)
 	if (retval < 0) {
 		warn("failed to create channel1Pin6 /sys endpoint - continuing without\n");
 	}
+	retval = device_create_file(piScopinatorDevice, &dev_attr_readTime);
+	if (retval < 0) {
+		warn("failed to create readTime /sys endpoint - continuing without\n");
+	}
 
 	mutex_init(&piScopinatorDeviceMutex);
 	/* This device uses a Kernel FIFO for its read operation */
@@ -503,6 +528,7 @@ static void __exit piScopinatorModuleExit(void)
 	device_remove_file(piScopinatorDevice, &dev_attr_channel1Pin5);
 	device_remove_file(piScopinatorDevice, &dev_attr_channel1Pin6);
 	device_remove_file(piScopinatorDevice, &dev_attr_readConfig);
+	device_remove_file(piScopinatorDevice, &dev_attr_readTime);
 	device_destroy(piScopinatorClass, MKDEV(piScopinatorMajor, 0));
 	class_unregister(piScopinatorClass);
 	class_destroy(piScopinatorClass);
