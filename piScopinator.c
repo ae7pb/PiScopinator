@@ -31,6 +31,17 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+
+
+
+
+// I readily admit I'm not a kernel programmer so if you read this don't be too harsh
+
+
+
+
+
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -79,6 +90,7 @@ static int piScopinatorSampleSize = PISCOPINATOR_SAMPLE_SIZE;
 // Data that we collected
 static int piScopinatorData[PISCOPINATOR_SAMPLE_SIZE];
 static int *dataPointer;
+static int dataPointerCount = 0;
 static long piScopinatorDataTime = 0;
 
 static struct rpiPeripheral gpio = {GPIO_BASE};
@@ -110,7 +122,7 @@ static void piScopinatorReadGPIO (void) {
     getnstimeofday(&startTime);
     
     // get the data for the whole first 32 gpio pins & figure out what we want later
-	for(x = piScopinatorSampleSize; x >0; x--) {
+	for(x = 0; x < piScopinatorSampleSize; x++) {
 		piScopinatorData[x] = GPIO_READ_ALL;
 	}
     
@@ -126,6 +138,10 @@ static void piScopinatorReadGPIO (void) {
     local_fiq_enable();
     local_irq_enable();    
     
+    // We are going to be outputting in pages so setting up a pointer and a 
+    // counter so we know when we are done.
+    dataPointer = (int*)&piScopinatorData;
+    dataPointerCount = 0;
     	
 }
 
@@ -418,7 +434,38 @@ static ssize_t piScopinatorReadTime(struct device* dev, struct device_attribute*
 	return scnprintf(buf, PAGE_SIZE, "Time spent in ns: %lu\n", piScopinatorDataTime);
 }
 
+/* This sysfs entry displays the sample time */
+static ssize_t piScopinatorReadData(struct device* dev, struct device_attribute* attr, char* buf)
+{
+	// max we can put in the scnprintf is 1024 bytes (compiler warning)
+	int counter = (1024 / 8 - 8);
+	char messagePageOut[(counter + 8)];
+	char messageByte[10];
+	int x = 0;
+	
+	memset(messagePageOut,0,PAGE_SIZE);
+	
+	// check if we have data
+	if(dataPointerCount >= piScopinatorSampleSize) {
+		return 0;
+	}
+	
+	for(x = 0; x < counter; x++) {
+		if(dataPointerCount > piScopinatorSampleSize) {
+			break;
+		}
+		snprintf(messageByte,9,"%08X",*dataPointer++);
+		strcat(messagePageOut,messageByte);
+		dataPointerCount++;
+	}
+	
+	return scnprintf(buf, counter, "%s", messagePageOut);
+}
+
+
 /* Declare the sysfs entries. DEVICE_ATTR(name shown, permissions, read function, write function) */
+// there are ways to consolodate these into a struct but for the life of me I can't figure it out
+// so bear with my code repitition
 static DEVICE_ATTR(sampleCount, S_IWUSR|S_IWGRP, NULL, piScopinatorSampleCount);
 static DEVICE_ATTR(channel1Pin1, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin1);
 static DEVICE_ATTR(channel1Pin2, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin2);
@@ -428,6 +475,7 @@ static DEVICE_ATTR(channel1Pin5, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin5
 static DEVICE_ATTR(channel1Pin6, S_IWUSR|S_IWGRP, NULL, piScopinatorChannel1Pin6);
 static DEVICE_ATTR(readConfig, S_IRUSR|S_IRGRP, piScopinatorReadConfig, NULL);
 static DEVICE_ATTR(readTime, S_IRUSR|S_IRGRP, piScopinatorReadTime, NULL);
+static DEVICE_ATTR(readData, S_IRUSR|S_IRGRP, piScopinatorReadData, NULL);
 
 /* Module initialization and release */
 static int __init piScopinatorModuleInit(void)
@@ -499,6 +547,10 @@ static int __init piScopinatorModuleInit(void)
 	if (retval < 0) {
 		warn("failed to create readTime /sys endpoint - continuing without\n");
 	}
+	retval = device_create_file(piScopinatorDevice, &dev_attr_readData);
+	if (retval < 0) {
+		warn("failed to create readData /sys endpoint - continuing without\n");
+	}
 
 	mutex_init(&piScopinatorDeviceMutex);
 	/* This device uses a Kernel FIFO for its read operation */
@@ -529,6 +581,7 @@ static void __exit piScopinatorModuleExit(void)
 	device_remove_file(piScopinatorDevice, &dev_attr_channel1Pin6);
 	device_remove_file(piScopinatorDevice, &dev_attr_readConfig);
 	device_remove_file(piScopinatorDevice, &dev_attr_readTime);
+	device_remove_file(piScopinatorDevice, &dev_attr_readData);
 	device_destroy(piScopinatorClass, MKDEV(piScopinatorMajor, 0));
 	class_unregister(piScopinatorClass);
 	class_destroy(piScopinatorClass);
