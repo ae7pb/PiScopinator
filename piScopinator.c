@@ -64,8 +64,6 @@ MODULE_VERSION(VERSION);
 MODULE_LICENSE("GPL");
 
 
-/* Flag used with the one_shot mode */
-static bool messageRead;
 /* A mutex will ensure that only one process accesses our device */
 static DEFINE_MUTEX(piScopinatorDeviceMutex);
 
@@ -150,7 +148,8 @@ void unmapPeripheral(struct rpiPeripheral *periph) {
 		__ATTR(_name, 0644, _name##_show, _name##_store)
 
 
-/* This sysfs entry displays the sample time */
+
+// This outputs the data
 static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf)
 {
 	// max we can put in the scnprintf is 1024 bytes (compiler warning)
@@ -159,6 +158,7 @@ static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr,
 	char messageByte[10];
 	int x = 0;
 	
+	dbg("");
 	memset(messagePageOut,0,PAGE_SIZE);
 	
 	// check if we have data
@@ -180,8 +180,54 @@ static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr,
 
 PISC_ATTR_RO(read_data);
 
+// If you read from this function it will trigger the readings.
+static ssize_t trigger_reading_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf) 
+{
+	dbg("");
+	
+	piScopinatorReadGPIO();
+	return scnprintf(buf, 16, "Reading complete");
+}
+
+PISC_ATTR_RO(trigger_reading);
+
+// This will return the approximate nanoseconds it took for the reading
+static ssize_t read_time_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf) 
+{
+	dbg("");
+	
+	return scnprintf(buf,10,"%lu",piScopinatorDataTime);
+}
+
+PISC_ATTR_RO(read_time);
+
+static ssize_t sample_size_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf) 
+{
+	dbg("");
+	
+	return scnprintf(buf,10,"%u", piScopinatorSampleSize);
+}
+
+
+static ssize_t sample_size_store(struct kobject *kobj, struct kobj_attribute *attr,
+			 const char *buf, size_t count)
+{
+	int sample_count = 0;
+	sscanf(buf, "%du", &sample_count);
+	if (sample_count > 0 && sample_count < PISCOPINATOR_SAMPLE_SIZE) {
+		piScopinatorSampleSize = sample_count;
+	}
+	
+	return count;
+}
+
+PISC_ATTR(sample_size);
+
 static struct attribute *pisc_attrs[] = {
 	&read_data_attr.attr,
+	&trigger_reading_attr.attr,
+	&read_time_attr.attr,
+	&sample_size_attr.attr,
 	NULL,
 };
 
@@ -196,6 +242,7 @@ static struct kobject *piscoperator_kobj;
 /* Module initialization and release */
 static int __init piScopinatorModuleInit(void)
 {
+	int retval;
 	
 	dbg("");
 	piscoperator_kobj = kobject_create_and_add("piscopinator", kernel_kobj);
@@ -203,14 +250,18 @@ static int __init piScopinatorModuleInit(void)
 		err("Cannot create kobject!");
 		goto crap_error;
 	}
-
+	
+	retval = sysfs_create_group(piscoperator_kobj, &pisc_attr_group);
+	if (retval)
+		kobject_put(piscoperator_kobj);
+		
 	mutex_init(&piScopinatorDeviceMutex);
 	/* This device uses a Kernel FIFO for its read operation */
 
 	// need to map the memory of the gpio registers
 	mapPeripheral(&gpio);
 
-	return 0;
+	return retval;
 
 crap_error:
 	return -1;
@@ -220,7 +271,8 @@ crap_error:
 static void __exit piScopinatorModuleExit(void)
 {
 	dbg("");
-
+	sysfs_remove_group(piscoperator_kobj, &pisc_attr_group);
+	kobject_put(piscoperator_kobj);
 	unmapPeripheral(&gpio);
 }
 
