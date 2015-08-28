@@ -132,24 +132,6 @@ struct rpiPeripheral {
 
 #define CLEAR_STATUS    BSC_STATUS_CLKT|BSC_S_ERR|BSC_S_DONE
 
-int mapPeripheral(struct rpiPeripheral *periph);
-void unmapPeripheral(struct rpiPeripheral *periph);
-static void piScopinatorReadGPIO (void);
-static int piScopinatorDeviceOpen(struct inode* inode, struct file* filp);
-static int piScopinatorDeviceClose(struct inode* inode, struct file* filp);
-static ssize_t piScopinatorDeviceRead(struct file* filp, char __user *buffer, size_t length, loff_t* offset);
-static ssize_t piScopinatorSampleCount(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin1(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin2(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin3(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin4(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin5(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorChannel1Pin6(struct device* dev, struct device_attribute* attr, const char* buf, size_t count);
-static ssize_t piScopinatorReadConfig(struct device* dev, struct device_attribute* attr, char* buf);
-static ssize_t piScopinatorReadTime(struct device* dev, struct device_attribute* attr, char* buf);
-static ssize_t piScopinatorReadData(struct device* dev, struct device_attribute* attr, char* buf);
-static int __init piScopinatorModuleInit(void);
-static void __exit piScopinatorModuleExit(void);
 
 
 #endif
