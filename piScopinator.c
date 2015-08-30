@@ -76,10 +76,11 @@ module_param(one_shot, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "disable the readout of multiple messages at once (default: true)");
 
 // Data that we collected
-static int piScopinatorData[PISCOPINATOR_SAMPLE_SIZE];
+static int collected_data[PISCOPINATOR_SAMPLE_SIZE];
+static unsigned long collection_times[PISCOPINATOR_SAMPLE_SIZE];
 //static int *dataPointer;
-static int dataPointerCount = 0;
-static long piScopinatorDataTime = 0;
+static int data_pointer_count = 0;
+static long collected_dataTime = 0;
 static int piScopinatorSampleSize = PISCOPINATOR_SAMPLE_SIZE;
 static char data_ready = 0;
 
@@ -88,10 +89,10 @@ static struct rpiPeripheral gpio = {GPIO_BASE};
 
 /*     Oscilloscope functions and hardware related    */
 
-static void piScopinatorReadGPIO (void) {
+static void read_gpio_fast (void) {
 
     int x = 0;
-    struct timespec startTime, endTime;
+    struct timespec start_time, end_time;
 
 
     dbg("");	
@@ -102,20 +103,20 @@ static void piScopinatorReadGPIO (void) {
     local_fiq_disable();
 
     // time this bad boy
-    getnstimeofday(&startTime);
+    getnstimeofday(&start_time);
 
     // get the data for the whole first 32 gpio pins & figure out what we want later
     for(x = 0; x < piScopinatorSampleSize; x++) {
-        piScopinatorData[x] = GPIO_READ_ALL;
+        collected_data[x] = GPIO_READ_ALL;
     }
 
     // end time
-    getnstimeofday(&endTime);
+    getnstimeofday(&end_time);
 
     // even though the functions say nano seconds it won't really be nano second resolution since our pi 
     // isn't that fast.  Oh well
 
-    piScopinatorDataTime = timespec_to_ns(&endTime) - timespec_to_ns(&startTime);
+    collected_dataTime = timespec_to_ns(&end_time) - timespec_to_ns(&start_time);
 
     // don't forget to reactivate IRQ
     local_fiq_enable();
@@ -123,8 +124,51 @@ static void piScopinatorReadGPIO (void) {
 
     // We are going to be outputting in pages so setting up a pointer and a 
     // counter so we know when we are done.
-    //dataPointer = (int*)&piScopinatorData;
-    dataPointerCount = 0;
+    //dataPointer = (int*)&collected_data;
+    data_pointer_count = 0;
+
+    data_ready = 1;
+}
+
+static void read_gpio_accurate (void) {
+
+    int x = 0;
+    struct timespec start_time, end_time, current_time;
+
+
+    dbg("");	
+
+
+    // IRQs will mess up our sample times so turn them off.
+    local_irq_disable();
+    local_fiq_disable();
+
+    // time this bad boy
+    getnstimeofday(&start_time);
+
+    // get the data for the whole first 32 gpio pins & figure out what we want later
+    for(x = 0; x < piScopinatorSampleSize; x++) {
+        collected_data[x] = GPIO_READ_ALL;
+        getnstimeofday(&current_time);
+        collection_times[x] = timespec_to_ns(&current_time);
+    }
+
+    // end time
+    getnstimeofday(&end_time);
+
+    // even though the functions say nano seconds it won't really be nano second resolution since our pi 
+    // isn't that fast.  Oh well
+
+    collected_dataTime = timespec_to_ns(&end_time) - timespec_to_ns(&start_time);
+
+    // don't forget to reactivate IRQ
+    local_fiq_enable();
+    local_irq_enable();    
+
+    // We are going to be outputting in pages so setting up a pointer and a 
+    // counter so we know when we are done.
+    //dataPointer = (int*)&collected_data;
+    data_pointer_count = 0;
 
     data_ready = 1;
 }
@@ -152,7 +196,7 @@ __ATTR(_name, 0644, _name##_show, _name##_store)
 
 
 // This outputs the data
-static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf)
+static ssize_t read_data_fast_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf)
 {
     // max we can put in the scnprintf is 1024 bytes (compiler warning)
     int frame_size = 1024;
@@ -170,22 +214,61 @@ static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr,
 
 
     // check if we have data
-    if(dataPointerCount >= piScopinatorSampleSize) {
+    if(data_pointer_count >= piScopinatorSampleSize) {
 		data_ready = 0;
         return 0;
     }
 
 
     for(x = 0; x < ((frame_size/8)-1); x++) { 
-        if(dataPointerCount >= piScopinatorSampleSize) {
+        if(data_pointer_count >= piScopinatorSampleSize) {
 			data_ready = 0;
             break;
         }
-		snprintf(messageByte,9,"%08X",piScopinatorData[dataPointerCount]);
+		snprintf(messageByte,9,"%08X",collected_data[data_pointer_count]);
 		strcat(messagePageOut,messageByte);
-		dataPointerCount++;
+		data_pointer_count++;
     }
     return scnprintf(buf, frame_size, "%s\n", messagePageOut);
+}
+
+PISC_ATTR_RO(read_data_fast);
+
+// This outputs the data
+static ssize_t read_data_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf)
+{
+    // max we can put in the scnprintf is 1024 bytes (compiler warning)
+    int frame_size = 1024;
+    char messagePageOut[frame_size];
+    char messageByte[30];
+    int x = 0;
+
+    dbg("");
+
+    if(data_ready == 0) {
+        return scnprintf(buf, 20, "No data\n");
+    }
+
+    memset(messagePageOut,0,(1024));
+
+
+    // check if we have data
+    if(data_pointer_count >= piScopinatorSampleSize) {
+		data_ready = 0;
+        return 0;
+    }
+
+	// these are 20 chars so we can do 50 at a time and be less than 1024
+    for(x = 0; x < (50); x++) { 
+        if(data_pointer_count >= piScopinatorSampleSize) {
+			data_ready = 0;
+            break;
+        }
+		snprintf(messageByte,22,"%09lX,%08X\n",collection_times[data_pointer_count], collected_data[data_pointer_count]);
+		strcat(messagePageOut,messageByte);
+		data_pointer_count++;
+    }
+    return scnprintf(buf, frame_size, "%s", messagePageOut);
 }
 
 PISC_ATTR_RO(read_data);
@@ -200,7 +283,7 @@ static ssize_t data_remaining_show(struct kobject *kobj, struct kobj_attribute *
         return scnprintf(buf, 20, "0\n");
     }
 
-	data_remaining = piScopinatorSampleSize - dataPointerCount;
+	data_remaining = piScopinatorSampleSize - data_pointer_count;
 
     return scnprintf(buf,10,"%d\n",data_remaining);
 }
@@ -209,20 +292,40 @@ PISC_ATTR_RO(data_remaining);
 
 
 // If you read from this function it will trigger the readings.
+static ssize_t trigger_reading_fast_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf) 
+{
+    dbg("");
+    read_gpio_fast();    
+    return scnprintf(buf, 16, "Done.\n");
+}
+
+// If you write to this function it will trigger the readings.
+static ssize_t trigger_reading_fast_store(struct kobject *kobj, struct kobj_attribute *attr,
+        const char *buf, size_t count)
+{
+    dbg("");
+
+    read_gpio_fast();
+    return count;
+}
+
+PISC_ATTR(trigger_reading_fast);
+
+// If you read from this function it will trigger the readings.
 static ssize_t trigger_reading_show(struct kobject *kobj, struct kobj_attribute *attr, char* buf) 
 {
     dbg("");
-    piScopinatorReadGPIO();    
-    return scnprintf(buf, 16, "um right.\n");
+    read_gpio_accurate();    
+    return scnprintf(buf, 16, "Done.\n");
 }
 
-// If you read from this function it will trigger the readings.
+// If you write to this function it will trigger the readings.
 static ssize_t trigger_reading_store(struct kobject *kobj, struct kobj_attribute *attr,
         const char *buf, size_t count)
 {
     dbg("");
 
-    piScopinatorReadGPIO();
+    read_gpio_accurate();
     return count;
 }
 
@@ -233,7 +336,7 @@ static ssize_t read_time_show(struct kobject *kobj, struct kobj_attribute *attr,
 {
     dbg("");
 
-    return scnprintf(buf,10,"%lu\n",piScopinatorDataTime);
+    return scnprintf(buf,10,"%lu\n",collected_dataTime);
 }
 
 PISC_ATTR_RO(read_time);
@@ -261,9 +364,11 @@ static ssize_t sample_size_store(struct kobject *kobj, struct kobj_attribute *at
 PISC_ATTR(sample_size);
 
 static struct attribute *pisc_attrs[] = {
+    &read_data_fast_attr.attr,
     &read_data_attr.attr,
     &data_remaining_attr.attr,
     &trigger_reading_attr.attr,
+    &trigger_reading_fast_attr.attr,
     &read_time_attr.attr,
     &sample_size_attr.attr,
     NULL,
